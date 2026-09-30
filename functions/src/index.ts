@@ -26,9 +26,10 @@ const db = getFirestore();
 // Owner email — kept in sync with src/lib/firebase.ts SYSTEM_ADMIN_EMAIL.
 const SYSTEM_ADMIN_EMAIL = 'tsmin@greenovator.co';
 
-// GitHub coordinates. If the repo is ever moved/renamed, update here too.
+// GitHub coordinates for the auto-publish workflow. Lives in farmplus-app
+// after the 3-repo split. If the repo is ever moved/renamed, update here too.
 const GITHUB_OWNER = 'tsminagri';
-const GITHUB_REPO = 'FarmplusDictionary';
+const GITHUB_REPO = 'farmplus-app';
 const GITHUB_WORKFLOW_FILE = 'publish-snapshot.yml';
 const GITHUB_REF = 'main';
 
