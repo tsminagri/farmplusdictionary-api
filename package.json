@@ -1,0 +1,39 @@
+{
+  "name": "farmplus-api",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Farm+ Dictionary backend: Firestore rules, Cloud Functions, operational scripts, and the shared type/logic package consumed by farmplus-app and farmplus-mobile.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "seed": "tsx scripts/seed-firestore.ts",
+    "mark-unverified": "tsx scripts/mark-unverified.ts",
+    "export-terms": "tsx scripts/export-terms.ts",
+    "sync-users": "tsx scripts/sync-users.ts",
+    "backfill-english-lower": "tsx scripts/backfill-english-lower.ts",
+    "bulk-translate": "tsx scripts/bulk-translate-descriptions.ts",
+    "grant-public-invoker": "tsx scripts/grant-public-invoker.ts",
+    "check-acre": "tsx scripts/check-acre.ts",
+    "deploy:rules": "firebase deploy --only firestore:rules",
+    "deploy:indexes": "firebase deploy --only firestore:indexes",
+    "deploy:firestore": "firebase deploy --only firestore",
+    "deploy:functions": "firebase deploy --only functions",
+    "deploy": "firebase deploy --only firestore,functions",
+    "lint": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@google/genai": "^2.24.0",
+    "firebase-admin": "^13.10.0",
+    "google-auth-library": "^10.4.0"
+  },
+  "devDependencies": {
+    "firebase-tools": "^15.19.1",
+    "tsx": "^4.21.0",
+    "typescript": "~5.8.2"
+  },
+  "files": [
+    "shared/**/*"
+  ]
+}

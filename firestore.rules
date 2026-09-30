@@ -1,0 +1,273 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helpers ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isEmailVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // The IMMUTABLE owner account. This email is the only role identity that
+    // lives in source. Mirrored in SYSTEM_ADMIN_EMAIL in src/lib/firebase.ts.
+    // Anyone holding this email's verified token is permanently admin and
+    // cannot be demoted by any other user. All other admins come from the
+    // /users/{uid}.role == 'admin' field, which admins can grant/revoke.
+    function isSystemAdmin() {
+      return isSignedIn()
+        && request.auth.token.email == 'tsmin@greenovator.co'
+        && request.auth.token.email_verified == true;
+    }
+
+    // Reads /users/{uid}.role for the requester. Returns '' if the doc or
+    // field is missing. Costs one extra doc read per rule check (cached
+    // within a single evaluation).
+    function callerRole() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', '')
+        : '';
+    }
+
+    function isAdmin() {
+      return isSystemAdmin() || (isSignedIn() && callerRole() == 'admin');
+    }
+
+    // Reviewer = admin OR DB-assigned reviewer OR (legacy) hardcoded email.
+    // Explicit DB role of 'contributor' wins over the legacy list so an admin
+    // demoting a legacy reviewer to User in the Users tab actually loses
+    // reviewer access. Mirror this priority in src/lib/firebase.ts.
+    function isReviewer() {
+      return isAdmin()
+        || (isSignedIn() && callerRole() == 'reviewer')
+        || (isSignedIn()
+            && callerRole() != 'contributor'
+            && request.auth.token.email_verified == true
+            && request.auth.token.email in [
+              'tsmin@greenovator.co',
+              'tsmin@greenwaymyanmar.org',
+              'tsminagri@gmail.com'
+            ]);
+    }
+
+    // --- Validation Blueprints ---
+
+    function isValidTerm(data) {
+      // Required fields + up to 13 keys (incl. optional descriptionMyanmar,
+      // englishLower for case-insensitive search, verification stamps,
+      // description, regionalVariations).
+      return data.keys().hasAll(['english', 'myanmar', 'category', 'updatedAt'])
+        && data.keys().size() <= 13
+        && data.english is string && data.english.size() >= 1 && data.english.size() <= 200
+        && data.myanmar is string && data.myanmar.size() >= 1 && data.myanmar.size() <= 200
+        && data.category in ['Fertilizers', 'Pests', 'Crops', 'Livestock', 'Aquaculture', 'Equipment', 'Techniques', 'General', 'Finance', 'Diseases', 'Weeds']
+        && (data.get('description', '') is string && data.get('description', '').size() <= 1000)
+        && (data.get('descriptionMyanmar', '') is string && data.get('descriptionMyanmar', '').size() <= 2000)
+        && (data.get('regionalVariations', null) == null || data.regionalVariations is map)
+        && (data.get('verified', false) is bool)
+        && (data.get('verifiedBy', '') is string && data.get('verifiedBy', '').size() <= 128)
+        && (data.get('verifiedByEmail', '') is string && data.get('verifiedByEmail', '').size() <= 254)
+        && (data.get('verifiedByName', '') is string && data.get('verifiedByName', '').size() <= 200)
+        && (data.get('englishLower', '') is string && data.get('englishLower', '').size() <= 200);
+    }
+
+    function isValidFeedback(data) {
+      return data.keys().hasAll(['termId', 'termEnglish', 'type', 'message', 'submittedBy', 'status', 'createdAt'])
+        && data.keys().size() <= 10 // + optional suggestedTranslation, localTerm, region
+        && data.termId is string && data.termId.size() >= 1 && data.termId.size() <= 128
+        && data.termEnglish is string && data.termEnglish.size() >= 1 && data.termEnglish.size() <= 200
+        && data.type in ['correction', 'local_term', 'other']
+        && data.message is string && data.message.size() <= 1000
+        && data.submittedBy == request.auth.uid
+        && data.status == 'pending'
+        && data.createdAt == request.time
+        && (data.get('suggestedTranslation', '') is string && data.get('suggestedTranslation', '').size() <= 200)
+        && (data.get('localTerm', '') is string && data.get('localTerm', '').size() <= 200)
+        && (data.get('region', '') is string && data.get('region', '').size() <= 100);
+    }
+
+    function isValidSubmission(data) {
+      return data.keys().hasAll(['term', 'translation', 'submittedBy', 'status', 'createdAt'])
+        // Optional: region (legacy), notes, regionalVariations
+        && data.keys().size() <= 8
+        && data.term is string && data.term.size() >= 1 && data.term.size() <= 200
+        && data.translation is string && data.translation.size() >= 1 && data.translation.size() <= 200
+        && data.submittedBy == request.auth.uid
+        && data.status == 'pending'
+        && data.createdAt == request.time
+        && (data.get('region', '') is string && data.get('region', '').size() <= 100)
+        && (data.get('notes', '') is string && data.get('notes', '').size() <= 500)
+        && (data.get('regionalVariations', null) == null
+            || (data.regionalVariations is map && data.regionalVariations.size() <= 10));
+    }
+
+    // --- Collections ---
+
+    match /terms/{termId} {
+      allow read: if true; // Public dictionary
+      allow create: if isAdmin() && isValidId(termId) && isValidTerm(request.resource.data) && request.resource.data.updatedAt == request.time;
+      // Admin can edit anything; the updatedAt fence keeps clients from forging timestamps.
+      allow update: if isAdmin() && isValidId(termId) && isValidTerm(request.resource.data) && request.resource.data.updatedAt == request.time;
+      // Verification-only update: anyone with reviewer powers (which includes
+      // admins) can flip the verified flag on a term without touching any
+      // content fields. The admin rule above already covers full content
+      // edits — this is the partial path used by the Verify button so we
+      // don't have to resend the whole term + a fresh updatedAt just to set
+      // a boolean. Un-verifying is still admin-only (handled by the
+      // verified == false branch below).
+      allow update: if isReviewer() && isValidId(termId)
+        && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['verified', 'verifiedBy', 'verifiedByEmail', 'verifiedByName', 'verifiedAt'])
+        && request.resource.data.verified is bool
+        && (
+          // Verifying: must stamp self as the reviewer and use the server time.
+          (request.resource.data.verified == true
+            && request.resource.data.verifiedBy == request.auth.uid
+            && request.resource.data.verifiedByEmail == request.auth.token.email
+            && request.resource.data.verifiedAt == request.time)
+          // Un-verifying via this partial path is admin-only (and the existing
+          // unverify() flow uses the full admin-update rule above).
+          || (request.resource.data.verified == false && isAdmin())
+        );
+      allow delete: if isAdmin() && isValidId(termId);
+
+      // Append-only audit chain. One doc per write that touched the parent
+      // term — admin edit, verify/unverify, feedback application, submission
+      // approval, etc. Reviewers can read the full chain; only reviewers can
+      // create, and the actor must claim themselves and stamp request.time.
+      // Updates and deletes are forbidden so the chain stays trustworthy.
+      match /history/{eventId} {
+        allow read: if isReviewer();
+        allow create: if isReviewer()
+          && isValidId(termId)
+          && request.resource.data.by == request.auth.uid
+          && request.resource.data.at == request.time
+          && request.resource.data.source is string
+          && request.resource.data.source.size() < 50
+          && (request.resource.data.get('byEmail', '') is string && request.resource.data.get('byEmail', '').size() <= 254)
+          && (request.resource.data.get('byName', '') is string && request.resource.data.get('byName', '').size() <= 200)
+          && (request.resource.data.get('feedbackId', '') is string && request.resource.data.get('feedbackId', '').size() <= 128)
+          && (request.resource.data.get('submissionId', '') is string && request.resource.data.get('submissionId', '').size() <= 128)
+          && (request.resource.data.get('note', '') is string && request.resource.data.get('note', '').size() <= 500)
+          && (request.resource.data.get('changes', null) == null || request.resource.data.changes is list);
+        allow update, delete: if false;
+      }
+    }
+
+    match /submissions/{submissionId} {
+      allow create: if isEmailVerified() && isValidId(submissionId) && isValidSubmission(request.resource.data);
+      allow get: if isSignedIn() && (resource.data.submittedBy == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.submittedBy == request.auth.uid || isAdmin());
+      // Admin can either flip status, or edit the user's content fields before approving.
+      allow update: if isAdmin() && (
+        (
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) &&
+          request.resource.data.status in ['approved', 'rejected']
+        ) ||
+        (
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['term', 'translation', 'region', 'notes', 'regionalVariations']) &&
+          request.resource.data.term is string && request.resource.data.term.size() >= 1 && request.resource.data.term.size() <= 200 &&
+          request.resource.data.translation is string && request.resource.data.translation.size() >= 1 && request.resource.data.translation.size() <= 200 &&
+          (request.resource.data.get('region', '') is string && request.resource.data.get('region', '').size() <= 100) &&
+          (request.resource.data.get('notes', '') is string && request.resource.data.get('notes', '').size() <= 500) &&
+          (request.resource.data.get('regionalVariations', null) == null
+            || (request.resource.data.regionalVariations is map && request.resource.data.regionalVariations.size() <= 10))
+        )
+      );
+      allow delete: if isAdmin();
+    }
+
+    match /feedback/{feedbackId} {
+      allow create: if isEmailVerified() && isValidId(feedbackId) && isValidFeedback(request.resource.data);
+      allow get: if isSignedIn() && (resource.data.submittedBy == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.submittedBy == request.auth.uid || isAdmin());
+      // Admin can flip status, or edit the user's content fields before resolving.
+      allow update: if isAdmin() && (
+        (
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) &&
+          request.resource.data.status in ['pending', 'resolved']
+        ) ||
+        (
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['type', 'suggestedTranslation', 'localTerm', 'region', 'message']) &&
+          request.resource.data.type in ['correction', 'local_term', 'other'] &&
+          (request.resource.data.get('suggestedTranslation', '') is string && request.resource.data.get('suggestedTranslation', '').size() <= 200) &&
+          (request.resource.data.get('localTerm', '') is string && request.resource.data.get('localTerm', '').size() <= 200) &&
+          (request.resource.data.get('region', '') is string && request.resource.data.get('region', '').size() <= 100) &&
+          (request.resource.data.get('message', '') is string && request.resource.data.get('message', '').size() <= 1000)
+        )
+      );
+      allow delete: if isAdmin();
+    }
+
+    // Per-user profile mirrored from Firebase Auth on each sign-in, plus an
+    // optional `role` field assigned by admins.
+    //
+    // Three distinct write paths, deliberately separated so a self-write can
+    // never touch the role and an admin role-write can never touch profile
+    // fields:
+    //
+    //   1. Self-create  — user signs in for the first time. Profile fields
+    //                     only, no role.
+    //   2. Self-update  — user signs back in. Profile fields only; if their
+    //                     doc already had a role, the role MUST stay equal.
+    //   3. Admin update — admin promoting/demoting another user. ONLY the
+    //                     `role` field may change, target may not be the
+    //                     System Admin, and admins can't change their own role.
+    match /users/{userId} {
+      // (1) Self-create on first sign-in.
+      allow create: if isSignedIn()
+        && request.auth.uid == userId
+        && request.resource.data.keys().hasOnly(['email', 'displayName', 'photoURL', 'createdAt', 'lastSeenAt'])
+        && request.resource.data.email is string
+        && (!('displayName' in request.resource.data) || request.resource.data.displayName is string)
+        && (!('photoURL' in request.resource.data) || request.resource.data.photoURL is string)
+        && (!('createdAt' in request.resource.data) || request.resource.data.createdAt is timestamp)
+        && (!('lastSeenAt' in request.resource.data) || request.resource.data.lastSeenAt is timestamp);
+
+      // (2) Self-update of profile fields. `role` may be present in the
+      // post-write doc (Firestore merge) but its value MUST equal the existing
+      // role — i.e. self-writes can never modify role.
+      allow update: if isSignedIn()
+        && request.auth.uid == userId
+        && request.resource.data.keys().hasOnly(['email', 'displayName', 'photoURL', 'createdAt', 'lastSeenAt', 'role'])
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role'])
+        && request.resource.data.email is string
+        && (!('displayName' in request.resource.data) || request.resource.data.displayName is string)
+        && (!('photoURL' in request.resource.data) || request.resource.data.photoURL is string)
+        && (!('createdAt' in request.resource.data) || request.resource.data.createdAt is timestamp)
+        && (!('lastSeenAt' in request.resource.data) || request.resource.data.lastSeenAt is timestamp);
+
+      // (3) Admin promoting/demoting another user. Hardened against:
+      //   - touching the System Admin (email check)
+      //   - changing your own role (uid check)
+      //   - touching any field other than `role`
+      //   - storing a non-canonical role value
+      allow update: if isAdmin()
+        && request.auth.uid != userId
+        && resource.data.email != 'tsmin@greenovator.co'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role'])
+        && request.resource.data.role in ['admin', 'reviewer', 'contributor'];
+
+      // Reviewers can read user docs (for attribution lookups in Reports etc.);
+      // anyone can read their own.
+      allow get: if isSignedIn() && (request.auth.uid == userId || isReviewer());
+      allow list: if isReviewer();
+
+      // Admin may remove a user doc — but never the System Admin's.
+      allow delete: if isAdmin() && resource.data.email != 'tsmin@greenovator.co';
+    }
+  }
+}

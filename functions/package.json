@@ -1,0 +1,21 @@
+{
+  "name": "farmplus-functions",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "20"
+  },
+  "main": "lib/index.js",
+  "scripts": {
+    "build": "tsc",
+    "deploy": "npm run build && firebase deploy --only functions"
+  },
+  "dependencies": {
+    "@google/genai": "^2.4.0",
+    "firebase-admin": "^13.10.0",
+    "firebase-functions": "^6.0.0"
+  },
+  "devDependencies": {
+    "typescript": "~5.8.2"
+  }
+}

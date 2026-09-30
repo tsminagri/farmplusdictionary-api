@@ -1,0 +1,22 @@
+# Secrets — NEVER commit
+service-account.json
+.gemini-api-key
+*.key
+.env
+.env.local
+
+# Build output
+functions/lib
+node_modules
+functions/node_modules
+
+# Logs
+*.log
+bulk-translate.log
+
+# OS
+.DS_Store
+
+# Firebase
+.firebase/
+firebase-debug.log
