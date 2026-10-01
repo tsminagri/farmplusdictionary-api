@@ -1,6 +1,6 @@
 /**
  * Export the live Firestore `terms` collection into
- * `../farmplus-app/src/data/initialTerms.json`, which the public site bundles.
+ * `../farmplusdictionary-app/src/data/initialTerms.json`, which the public site bundles.
  *
  * Run this whenever the review team has finished a batch of verifications or
  * the admin has edited/added terms — then rebuild & redeploy the site.
@@ -23,7 +23,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '..');
 const OUT = process.env.EXPORT_OUT
   ? resolve(process.env.EXPORT_OUT)
-  : resolve(root, '../farmplus-app/src/data/initialTerms.json');
+  : resolve(root, '../farmplusdictionary-app/src/data/initialTerms.json');
 // Ensure the target directory exists — helps first-run + CI paths.
 try { mkdirSync(dirname(OUT), { recursive: true }); } catch { /* already exists */ }
 

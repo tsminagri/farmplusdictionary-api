@@ -1,15 +1,15 @@
-# farmplus-api
+# farmplusdictionary-api
 
 Backend for **Farm+ Dictionary** — Firestore rules, indexes, Cloud
 Functions, operational scripts, and the shared TypeScript types + pure
-logic that `farmplus-app` and `farmplus-mobile` consume.
+logic that `farmplusdictionary-app` and `farmplusdictionary-mobile` consume.
 
 Firebase project: `farmplus-dictionary` (Blaze).
 
 ## Contents
 
 ```
-farmplus-api/
+farmplusdictionary-api/
 ├── shared/              # exported for other projects (via git URL install)
 │   ├── types.ts           # Term, Submission, Feedback, AppUser, roles, history
 │   ├── slug.ts            # slugify(english) → doc id
@@ -44,7 +44,7 @@ npm run deploy:firestore       # both
 npm run deploy:functions
 
 # Operational scripts (all use tsx, need service-account.json locally)
-npm run export-terms           # dump /terms → JSON (for farmplus-app snapshot)
+npm run export-terms           # dump /terms → JSON (for farmplusdictionary-app snapshot)
 npm run bulk-translate         # Gemini translate all descriptions to Myanmar
 npm run backfill-english-lower # ensures every term has englishLower field
 npm run sync-users             # backfill Firebase Auth users into /users
@@ -64,12 +64,12 @@ All are gitignored.
 
 ## `shared/` — consumed by other projects
 
-`farmplus-app` and `farmplus-mobile` install this repo via git URL:
+`farmplusdictionary-app` and `farmplusdictionary-mobile` install this repo via git URL:
 
 ```json
 {
   "dependencies": {
-    "farmplus-api": "github:tsminagri/farmplus-api"
+    "farmplusdictionary-api": "github:tsminagri/farmplusdictionary-api"
   }
 }
 ```
@@ -77,12 +77,12 @@ All are gitignored.
 Then import:
 
 ```ts
-import type { Term } from 'farmplus-api/shared/types';
-import { slugify } from 'farmplus-api/shared/slug';
+import type { Term } from 'farmplusdictionary-api/shared/types';
+import { slugify } from 'farmplusdictionary-api/shared/slug';
 ```
 
 After any change to `shared/*`, push this repo and run
-`npm update farmplus-api` in the consumer project.
+`npm update farmplusdictionary-api` in the consumer project.
 
 ## Rules for `shared/`
 
@@ -93,6 +93,6 @@ After any change to `shared/*`, push this repo and run
 
 ## See also
 
-- `../farmplus-app/` — the web app
-- `../farmplus-mobile/` — future mobile app
-- Root `SPEC.md` in `farmplus-app` — full project specification
+- `../farmplusdictionary-app/` — the web app
+- `../farmplusdictionary-mobile/` — future mobile app
+- Root `SPEC.md` in `farmplusdictionary-app` — full project specification
