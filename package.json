@@ -14,6 +14,8 @@
     "sync-users": "tsx scripts/sync-users.ts",
     "backfill-english-lower": "tsx scripts/backfill-english-lower.ts",
     "bulk-translate": "tsx scripts/bulk-translate-descriptions.ts",
+    "export-untranslated": "tsx scripts/export-untranslated.ts",
+    "import-translations": "tsx scripts/import-translations.ts",
     "grant-public-invoker": "tsx scripts/grant-public-invoker.ts",
     "check-acre": "tsx scripts/check-acre.ts",
     "deploy:rules": "firebase deploy --only firestore:rules",
