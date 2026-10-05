@@ -26,11 +26,11 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '..');
 
 // --- Config ---------------------------------------------------------------
-// Free-tier gemini-3.5-flash caps at 5 requests/minute per project. We stay
-// safely under that with a 13s pause between sequential calls (≈4.6 RPM),
-// which the API almost never rejects. On the rare 429 we honour the server's
-// retryDelay and try again — with the same doc — so nothing is lost.
-const PACE_MS = 13000;              // ~4.6 RPM (free-tier limit is 5 RPM)
+// Paid-tier gemini-3.5-flash supports ~1,000 RPM. We run with modest
+// concurrency and almost no pacing — the retry/backoff logic handles the
+// rare transient 429/503. Should finish ~6k translations in minutes.
+const CONCURRENCY = 10;             // parallel in-flight requests
+const PACE_MS = 100;                // tiny jitter between batch starts
 const MAX_DESCRIPTION_LEN = 2000;   // matches the Cloud Function's cap
 const MODEL = 'gemini-3.5-flash';
 const LOG_FILE = resolve(root, 'bulk-translate.log');
@@ -158,38 +158,40 @@ async function main(): Promise<void> {
   // 13s pace ≈ 4.6 RPM, comfortably under the limit. The translate() helper
   // handles rare 429/503 with its own backoff so a burst of noise from Google
   // doesn't lose the current doc.
+  // Process in waves of CONCURRENCY. Each wave fires in parallel, we await
+  // all of them, then start the next wave after a tiny pace delay. The
+  // translate() helper handles rare 429/503 with its own backoff.
   const startedAt = Date.now();
-  for (let i = 0; i < targets.length; i++) {
-    const row = targets[i];
-    const attemptedAt = Date.now();
-    try {
-      const translated = await translate(row.description);
-      await db.collection('terms').doc(row.id).update({
-        descriptionMyanmar: translated,
-        updatedAt: FieldValue.serverTimestamp(),
-      });
-      ok++;
-    } catch (e) {
-      failed++;
-      const errStr = e instanceof Error ? e.message : String(e);
-      failures.push({ id: row.id, error: errStr.slice(0, 200) });
-      log(`  FAILED ${row.id} (${row.english}): ${errStr.slice(0, 120)}`);
+  for (let i = 0; i < targets.length; i += CONCURRENCY) {
+    const wave = targets.slice(i, i + CONCURRENCY);
+    const results = await Promise.allSettled(
+      wave.map(async (row) => {
+        const translated = await translate(row.description);
+        await db.collection('terms').doc(row.id).update({
+          descriptionMyanmar: translated,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+        return row.id;
+      }),
+    );
+    for (let j = 0; j < results.length; j++) {
+      const r = results[j];
+      if (r.status === 'fulfilled') {
+        ok++;
+      } else {
+        failed++;
+        const errStr = r.reason instanceof Error ? r.reason.message : String(r.reason);
+        failures.push({ id: wave[j].id, error: errStr.slice(0, 200) });
+      }
     }
-    const done = i + 1;
-    if (done % 10 === 0 || done === targets.length) {
-      const elapsed = (Date.now() - startedAt) / 1000;
-      const rate = done / elapsed;
-      const remaining = (targets.length - done) / Math.max(rate, 0.1);
-      const eta = new Date(Date.now() + remaining * 1000).toISOString().slice(11, 19);
-      const pct = Math.round((done / targets.length) * 100);
-      log(`Progress: ${done}/${targets.length} (${pct}%) — ok=${ok} failed=${failed} — ETA ~${eta} UTC`);
-    }
-    // Sleep to hit our pace target. If translate() already waited a long time
-    // for backoff, skip the pace sleep — it's already been paced enough.
-    const spent = Date.now() - attemptedAt;
-    if (spent < PACE_MS && i < targets.length - 1) {
-      await sleep(PACE_MS - spent);
-    }
+    const done = Math.min(i + CONCURRENCY, targets.length);
+    const elapsed = (Date.now() - startedAt) / 1000;
+    const rate = done / Math.max(elapsed, 0.1);
+    const remaining = (targets.length - done) / Math.max(rate, 0.1);
+    const eta = new Date(Date.now() + remaining * 1000).toISOString().slice(11, 19);
+    const pct = Math.round((done / targets.length) * 100);
+    log(`Progress: ${done}/${targets.length} (${pct}%) — ok=${ok} failed=${failed} — rate=${rate.toFixed(1)}/s — ETA ~${eta} UTC`);
+    if (i + CONCURRENCY < targets.length) await sleep(PACE_MS);
   }
 
   log(`\nDone. ${ok} translated, ${failed} failed.`);

@@ -16,6 +16,7 @@
     "bulk-translate": "tsx scripts/bulk-translate-descriptions.ts",
     "export-untranslated": "tsx scripts/export-untranslated.ts",
     "import-translations": "tsx scripts/import-translations.ts",
+    "bulk-translate-cloud": "tsx scripts/bulk-translate-cloud.ts",
     "grant-public-invoker": "tsx scripts/grant-public-invoker.ts",
     "check-acre": "tsx scripts/check-acre.ts",
     "deploy:rules": "firebase deploy --only firestore:rules",
@@ -26,6 +27,7 @@
     "lint": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@google-cloud/translate": "^10.1.1",
     "@google/genai": "^2.24.0",
     "firebase-admin": "^13.10.0",
     "google-auth-library": "^10.4.0"
