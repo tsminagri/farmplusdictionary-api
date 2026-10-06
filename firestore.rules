@@ -69,6 +69,15 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('blocked', false) == true;
     }
 
+    // Temporary submission limit set by the throttle function (functions/src/throttle.ts) when a
+    // user reaches the hourly cap. Refuses new submissions/feedback until the time passes.
+    function isRateLimited() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('rateLimitedUntil', null) != null
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.rateLimitedUntil > request.time;
+    }
+
     // --- Validation Blueprints ---
 
     function isValidTerm(data) {
@@ -174,7 +183,7 @@ service cloud.firestore {
     }
 
     match /submissions/{submissionId} {
-      allow create: if isEmailVerified() && !isBlocked() && isValidId(submissionId) && isValidSubmission(request.resource.data);
+      allow create: if isEmailVerified() && !isBlocked() && !isRateLimited() && isValidId(submissionId) && isValidSubmission(request.resource.data);
       allow get: if isSignedIn() && (resource.data.submittedBy == request.auth.uid || isAdmin());
       allow list: if isSignedIn() && (resource.data.submittedBy == request.auth.uid || isAdmin());
       // Admin can either flip status, or edit the user's content fields before approving.
@@ -198,7 +207,7 @@ service cloud.firestore {
     }
 
     match /feedback/{feedbackId} {
-      allow create: if isEmailVerified() && !isBlocked() && isValidId(feedbackId) && isValidFeedback(request.resource.data);
+      allow create: if isEmailVerified() && !isBlocked() && !isRateLimited() && isValidId(feedbackId) && isValidFeedback(request.resource.data);
       allow get: if isSignedIn() && (resource.data.submittedBy == request.auth.uid || isAdmin());
       allow list: if isSignedIn() && (resource.data.submittedBy == request.auth.uid || isAdmin());
       // Admin can flip status, or edit the user's content fields before resolving.
@@ -250,8 +259,8 @@ service cloud.firestore {
       // role — i.e. self-writes can never modify role.
       allow update: if isSignedIn()
         && request.auth.uid == userId
-        && request.resource.data.keys().hasOnly(['email', 'displayName', 'photoURL', 'createdAt', 'lastSeenAt', 'role', 'blocked', 'blockedAt', 'blockedReason'])
-        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'blocked', 'blockedAt', 'blockedReason'])
+        && request.resource.data.keys().hasOnly(['email', 'displayName', 'photoURL', 'createdAt', 'lastSeenAt', 'role', 'blocked', 'blockedAt', 'blockedReason', 'rateLimitedUntil'])
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'blocked', 'blockedAt', 'blockedReason', 'rateLimitedUntil'])
         && request.resource.data.email is string
         && (!('displayName' in request.resource.data) || request.resource.data.displayName is string)
         && (!('photoURL' in request.resource.data) || request.resource.data.photoURL is string)
@@ -266,7 +275,7 @@ service cloud.firestore {
       allow update: if isAdmin()
         && request.auth.uid != userId
         && resource.data.email != 'tsmin@greenovator.co'
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role', 'blocked', 'blockedAt', 'blockedReason'])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role', 'blocked', 'blockedAt', 'blockedReason', 'rateLimitedUntil'])
         && request.resource.data.get('role', 'contributor') in ['admin', 'reviewer', 'contributor']
         && request.resource.data.get('blocked', false) is bool;
 
