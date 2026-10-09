@@ -116,8 +116,8 @@ service cloud.firestore {
 
     function isValidSubmission(data) {
       return data.keys().hasAll(['term', 'translation', 'submittedBy', 'status', 'createdAt'])
-        // Optional: region (legacy), notes, regionalVariations
-        && data.keys().size() <= 8
+        // Optional: region (legacy), notes, notesMyanmar, regionalVariations
+        && data.keys().size() <= 9
         && data.term is string && data.term.size() >= 1 && data.term.size() <= 200
         && data.translation is string && data.translation.size() >= 1 && data.translation.size() <= 200
         && data.submittedBy == request.auth.uid
@@ -125,6 +125,7 @@ service cloud.firestore {
         && data.createdAt == request.time
         && (data.get('region', '') is string && data.get('region', '').size() <= 100)
         && (data.get('notes', '') is string && data.get('notes', '').size() <= 500)
+        && (data.get('notesMyanmar', '') is string && data.get('notesMyanmar', '').size() <= 500)
         && (data.get('regionalVariations', null) == null
             || (data.regionalVariations is map && data.regionalVariations.size() <= 10));
     }
@@ -194,11 +195,12 @@ service cloud.firestore {
         ) ||
         (
           request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['term', 'translation', 'region', 'notes', 'regionalVariations']) &&
+            .hasOnly(['term', 'translation', 'region', 'notes', 'notesMyanmar', 'regionalVariations']) &&
           request.resource.data.term is string && request.resource.data.term.size() >= 1 && request.resource.data.term.size() <= 200 &&
           request.resource.data.translation is string && request.resource.data.translation.size() >= 1 && request.resource.data.translation.size() <= 200 &&
           (request.resource.data.get('region', '') is string && request.resource.data.get('region', '').size() <= 100) &&
           (request.resource.data.get('notes', '') is string && request.resource.data.get('notes', '').size() <= 500) &&
+          (request.resource.data.get('notesMyanmar', '') is string && request.resource.data.get('notesMyanmar', '').size() <= 500) &&
           (request.resource.data.get('regionalVariations', null) == null
             || (request.resource.data.regionalVariations is map && request.resource.data.regionalVariations.size() <= 10))
         )
@@ -286,6 +288,26 @@ service cloud.firestore {
 
       // Admin may remove a user doc — but never the System Admin's.
       allow delete: if isAdmin() && resource.data.email != 'tsmin@greenovator.co';
+    }
+
+    // Search analytics — aggregated per unique normalized query. Anyone can
+    // bump the count (anonymous users count too), but only reviewers can read
+    // the collection so we don't leak search activity to the public.
+    match /searchQueries/{queryId} {
+      allow read: if isReviewer();
+      allow create, update: if request.resource.data.query is string
+        && request.resource.data.query.size() <= 100
+        && request.resource.data.queryNormalized is string
+        && request.resource.data.queryNormalized.size() <= 100
+        && request.resource.data.resultCount is int
+        && request.resource.data.noResults is bool
+        // Everything else is managed by the client with the known shape above
+        // plus serverTimestamps and the `count` increment.
+        && request.resource.data.keys().hasOnly([
+          'query', 'queryNormalized', 'count', 'resultCount',
+          'noResults', 'firstSeenAt', 'lastSeenAt'
+        ]);
+      allow delete: if isAdmin();
     }
   }
 }

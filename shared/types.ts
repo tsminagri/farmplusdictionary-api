@@ -47,7 +47,10 @@ export interface Submission {
    * submission.
    */
   regionalVariations?: Record<string, string>;
+  /** English note/definition suggested with the term; becomes `description` when approved. */
   notes?: string;
+  /** Myanmar note/definition suggested with the term; becomes `descriptionMyanmar` when approved. */
+  notesMyanmar?: string;
   submittedBy: string;
   status: 'pending' | 'approved' | 'rejected';
   createdAt: any; // Firestore Timestamp
